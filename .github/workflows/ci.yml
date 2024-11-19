@@ -25,6 +25,9 @@ jobs:
 
       # Run your tests
       - name: Run tests
+        env:
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           pytest
 
