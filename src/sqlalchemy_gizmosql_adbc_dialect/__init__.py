@@ -13,7 +13,7 @@ from sqlalchemy.engine.url import URL
 from adbc_driver_manager import OperationalError
 
 
-__version__ = "0.0.21"
+__version__ = "0.0.22"
 
 if TYPE_CHECKING:
     from sqlalchemy.base import Connection
