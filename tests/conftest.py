@@ -33,21 +33,12 @@ def wait_for_container_log(container, timeout=30, poll_interval=1, ready_message
 
 @pytest.fixture(scope="session")
 def gizmosql_server():
-    # Get credentials from environment variables
-    username = os.getenv("GHCR_USERNAME")
-    token = os.getenv("GHCR_TOKEN")
-    if not username or not token:
-        raise ValueError("Environment variables GHCR_USERNAME and GHCR_TOKEN must be set.")
-
     # Initialize Docker client
     client = docker.from_env()
 
-    # Authenticate with GHCR
-    client.login(username=username, password=token, registry="ghcr.io")
-
     container = client.containers.run(
-        image="ghcr.io/gizmodata/gizmosql:latest",
-        name="ibis-gizmosql-test",
+        image="gizmodata/gizmosql:latest",
+        name="sqlalchemy-gizmosql-test",
         detach=True,
         remove=True,
         tty=True,
