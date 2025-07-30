@@ -24,8 +24,8 @@ classifiers = [
 keywords = ["sqlalchemy", "flight-sql", "gizmosql", "adbc", "dialect"]
 dependencies = [
     "sqlalchemy==2.0.*",
-    "adbc-driver-flightsql==1.6.*",
-    "pyarrow==20.0.*",
+    "adbc-driver-flightsql==1.7.*",
+    "pyarrow==21.0.*",
     "psycopg2==2.9.*",
     "importlib-metadata==8.7.*"
 ]
