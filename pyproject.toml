@@ -14,7 +14,7 @@ name = "sqlalchemy-gizmosql-adbc-dialect"
 version = "0.0.24"
 description = "A SQLAlchemy dialect for connecting to a [GizmoSQL](https://github.com/gizmodata/gizmosql) server with ADBC"
 readme = "README.md"
-authors = [{ name = "Philip Moore", email = "prmoore77@hotmail.com" }]
+authors = [{ name = "Philip Moore", email = "philip@gizmodata.com" }]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 classifiers = [
