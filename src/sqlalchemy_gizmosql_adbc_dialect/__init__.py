@@ -180,6 +180,11 @@ class GizmoSQLDialect(DefaultDialect):
                                 conn_kwargs=conn_kwargs
                                 )
 
+        vendor_version = conn.adbc_get_info().get("vendor_version")
+
+        if not re.search(pattern="^duckdb ", string=vendor_version):
+            raise RuntimeError(f"Unsupported GizmoSQL server backend: '{vendor_version}'")
+
         # Add a notices attribute for the PostgreSQL / DuckDB dialect...
         setattr(conn, "notices", ["n/a"])
 
