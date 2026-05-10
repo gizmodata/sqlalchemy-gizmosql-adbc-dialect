@@ -1,92 +1,100 @@
+from __future__ import annotations
+
+import datetime
 import os
 import time
+from pathlib import Path
 
-import docker
 import pytest
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine
 from sqlalchemy.engine.url import URL
 from sqlalchemy.orm import Session
 
 from classes import Base
 
 
-# Constants
-GIZMOSQL_PORT = 31337
+GIZMOSQL_USERNAME = "gizmosql_username"
+GIZMOSQL_PASSWORD = "gizmosql_password"
 
 
-# Function to wait for a specific log message indicating the container is ready
-def wait_for_container_log(container, timeout=30, poll_interval=1, ready_message="GizmoSQL server - started"):
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        # Get the logs from the container
-        logs = container.logs().decode('utf-8')
+def _generate_self_signed_tls_cert(out_dir: Path) -> tuple[Path, Path]:
+    """Mint a self-signed RSA cert + key for ``localhost`` so the test
+    server's Flight SQL endpoint is reachable over ``grpc+tls://``."""
+    from cryptography import x509  # noqa: PLC0415
+    from cryptography.hazmat.primitives import hashes, serialization  # noqa: PLC0415
+    from cryptography.hazmat.primitives.asymmetric import rsa  # noqa: PLC0415
+    from cryptography.x509.oid import NameOID  # noqa: PLC0415
 
-        # Check if the ready message is in the logs
-        if ready_message in logs:
-            return True
-
-        # Wait for the next poll
-        time.sleep(poll_interval)
-
-    raise TimeoutError(f"Container did not show '{ready_message}' in logs within {timeout} seconds.")
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.DNSName("localhost")]),
+            critical=False,
+        )
+        .sign(key, hashes.SHA256())
+    )
+    cert_path = out_dir / "tls_cert.pem"
+    key_path = out_dir / "tls_key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    return cert_path, key_path
 
 
 @pytest.fixture(scope="session")
-def gizmosql_server():
-    # Initialize Docker client
-    client = docker.from_env()
+def gizmosql_server(tmp_path_factory):
+    """Start a GizmoSQL server as a managed subprocess via the
+    [gizmosql](https://pypi.org/project/gizmosql/) PyPI package — no
+    Docker needed."""
+    gizmosql = pytest.importorskip("gizmosql")
 
-    container = client.containers.run(
-        image="gizmodata/gizmosql:latest",
-        name="sqlalchemy-gizmosql-test",
-        detach=True,
-        remove=True,
-        tty=True,
-        init=True,
-        ports={f"{GIZMOSQL_PORT}/tcp": GIZMOSQL_PORT},
-        environment={"GIZMOSQL_USERNAME": "gizmosql_username",
-                     "GIZMOSQL_PASSWORD": "gizmosql_password",
-                     "TLS_ENABLED": "1",
-                     "PRINT_QUERIES": "1"
-                     },
-        stdout=True,
-        stderr=True
-    )
+    tls_dir = tmp_path_factory.mktemp("tls")
+    tls_dir.chmod(0o700)
+    tls_cert, tls_key = _generate_self_signed_tls_cert(tls_dir)
 
-    # Wait for the container to be ready
-    wait_for_container_log(container)
-
-    yield container
-
-    print(f"Container logs: {container.logs().decode('utf-8')}")
-    container.stop()
+    with gizmosql.Server(
+        username=GIZMOSQL_USERNAME,
+        password=GIZMOSQL_PASSWORD,
+        extra_args=["--tls", str(tls_cert), str(tls_key)],
+        extra_env={"PRINT_QUERIES": "1"},
+    ) as srv:
+        yield srv
 
 
 @pytest.fixture(scope="session")
 def engine(gizmosql_server):
-    # Build the URL
-    url = URL.create(drivername="gizmosql",
-                     host="localhost",
-                     port=31337,
-                     username=os.getenv("GIZMOSQL_USERNAME", "gizmosql_username"),
-                     password=os.getenv("GIZMOSQL_PASSWORD", "gizmosql_password"),
-                     query={"disableCertificateVerification": "True",
-                            "useEncryption": "True"
-                            }
-                     )
-
+    url = URL.create(
+        drivername="gizmosql",
+        host=gizmosql_server.host,
+        port=gizmosql_server.port,
+        username=os.getenv("GIZMOSQL_USERNAME", gizmosql_server.username),
+        password=os.getenv("GIZMOSQL_PASSWORD", gizmosql_server.password),
+        query={
+            "disableCertificateVerification": "True",
+            "useEncryption": "True",
+        },
+    )
     print(f"Database URL: {url}")
-    engine = create_engine(url=url, echo=True)
-
-    return engine
+    return create_engine(url=url, echo=True)
 
 
 @pytest.fixture(scope="session")
 def session_and_metadata(engine):
-    # Create all tables defined in the ORM models (if they don't exist)
     Base.metadata.create_all(bind=engine)
     time.sleep(1)
-
-    # Yield both the session and the metadata as a tuple
     with Session(bind=engine) as session:
         yield session, Base.metadata
